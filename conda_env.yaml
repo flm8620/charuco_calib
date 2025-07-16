@@ -1,0 +1,20 @@
+name: charuco-calib
+channels:
+  - conda-forge              # 建议只用 conda-forge，方便版本一致
+dependencies:
+  # ───── 基础 ─────
+  - python = 3.11
+  - pip
+
+  # ───── 计算 & 工具 ─────
+  - numpy                    # 向量／矩阵运算
+  - tqdm                     # 进度条
+  - pyyaml                   # 读写 .yaml 文件
+  - ffmpeg                   # OpenCV 调用 FFmpeg 读写 MP4
+
+  # ───── 视觉核心 ─────
+  - opencv = 4.10.*          # conda‑forge 构建已包含 contrib 模块与 ArUco
+
+  # ───── 可选：可视化 / 调试 ─────
+  # - matplotlib             # 若想用 plt.imshow 之类，可取消注释
+  # - jupyterlab             # 若在笔记本环境里实验
