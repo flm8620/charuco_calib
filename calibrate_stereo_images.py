@@ -134,30 +134,62 @@ def stereo_calibrate_images(l_image, r_image, l_yaml, r_yaml, out_dir):
     # 保存外参
     with open(out_dir/"stereo.yaml", "w") as f:
         yaml.dump(dict(
-            R = R.tolist(),
-            T = T.ravel().tolist(),
+            # 变换关系: P_right = R * P_left + T
+            R = R.tolist(),  # 从左相机到右相机的旋转 (3x3)
+            T = T.ravel().tolist(),  # 从左相机到右相机的平移 (3x1)
             rms = float(rms),
             essential = E.tolist(),
             fundamental = F.tolist(),
             left_image_size = [frameL.shape[1], frameL.shape[0]],
-            right_image_size = [frameR.shape[1], frameR.shape[0]]
+            right_image_size = [frameR.shape[1], frameR.shape[0]],
+            # 相机在世界坐标系(左相机坐标系)中的位置和姿态
+            right_camera_position_in_left = (-R.T @ T).ravel().tolist(),
+            right_camera_rotation_in_left = R.T.tolist()
         ), f)
     print(f"[√] R、T 已写入 {out_dir/'stereo.yaml'}")
+    
+    # 打印变换关系说明
+    print("\n=== 双目标定结果说明 ===")
+    print("变换关系: P_right = R * P_left + T")
+    print(f"R (左→右旋转):\n{R}")
+    print(f"T (左→右平移): {T.ravel()}")
+    print(f"右相机在左相机坐标系中的位置: {(-R.T @ T).ravel()}")
+    print(f"基线距离: {np.linalg.norm(T):.4f} 米")
 
     # 生成PLY可视化文件
-    generate_camera_ply(K1, K2, R, T, (frameL.shape[1], frameL.shape[0]), out_dir)
+    left_size = (frameL.shape[1], frameL.shape[0])
+    right_size = (frameR.shape[1], frameR.shape[0])
+    generate_camera_ply(K1, K2, R, T, left_size, right_size, out_dir)
     
     return R, T
 
-def generate_camera_ply(K1, K2, R, T, image_size, out_dir):
-    """生成相机frustum的PLY文件"""
-    width, height = image_size
+def generate_camera_ply(K1, K2, R, T, left_image_size, right_image_size, out_dir):
+    """
+    生成相机frustum的PLY文件
     
-    # 定义frustum的深度和角点
-    frustum_depth = 0.3  # 30cm深度
+    数学关系说明：
+    - R, T 是从左相机坐标系到右相机坐标系的变换
+    - P_right = R * P_left + T
+    - 左相机作为世界坐标系原点 (0,0,0)
+    - 右相机在世界坐标系中的位置: -R^T * T
+    - 右相机在世界坐标系中的姿态: R^T
     
-    def camera_frustum_points(K, R_cam=None, t_cam=None):
+    Args:
+        K1: 左相机内参矩阵
+        K2: 右相机内参矩阵
+        R: 从左相机到右相机的旋转矩阵
+        T: 从左相机到右相机的平移向量
+        left_image_size: 左图像尺寸 (width, height)
+        right_image_size: 右图像尺寸 (width, height)
+        out_dir: 输出目录
+    """
+    # 定义frustum的深度
+    frustum_depth = 0.1  # 30cm深度
+    
+    def camera_frustum_points(K, image_size, R_cam=None, t_cam=None):
         """生成单个相机的frustum角点"""
+        width, height = image_size
+        
         # 图像角点在像素坐标系
         corners_2d = np.array([
             [0, 0],
@@ -194,10 +226,17 @@ def generate_camera_ply(K1, K2, R, T, image_size, out_dir):
         return points
     
     # 相机1 (左相机，作为世界坐标系原点)
-    cam1_points = camera_frustum_points(K1)
+    # 位置: (0, 0, 0), 姿态: 单位矩阵
+    cam1_points = camera_frustum_points(K1, left_image_size)
     
-    # 相机2 (右相机，需要应用R和T变换)
-    cam2_points = camera_frustum_points(K2, R.T, -R.T @ T)
+    # 相机2 (右相机)
+    # 从左相机坐标系到右相机坐标系: P_right = R * P_left + T
+    # 因此右相机在世界坐标系(左相机坐标系)中的变换:
+    # - 位置: -R^T * T (右相机中心在左相机坐标系中的位置)
+    # - 姿态: R^T (右相机坐标轴在左相机坐标系中的方向)
+    cam2_position = -R.T @ T
+    cam2_orientation = R.T
+    cam2_points = camera_frustum_points(K2, right_image_size, cam2_orientation, cam2_position)
     
     # 合并所有点
     all_points = np.vstack([cam1_points, cam2_points])
